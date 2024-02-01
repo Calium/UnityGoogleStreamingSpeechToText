@@ -61,6 +61,8 @@ namespace GoogleCloudStreamingSpeechToText {
         private const double NormalizedFloatTo16BitConversionFactor = 0x7FFF + 0.4999999999999999;
         private const float MicInitializationTimeout = 1;
         private const int StreamingLimit = 290000; // almost 5 minutes
+        
+        public string LanguageCode { get; set; } = "he";
 
         public void StartListening() {
             if (!_initialized) {
@@ -107,10 +109,10 @@ namespace GoogleCloudStreamingSpeechToText {
             string credentialsPath = Path.Combine(Application.streamingAssetsPath, CredentialFileName);
             if (!File.Exists(credentialsPath)) {
                 Debug.LogError("Could not find StreamingAssets/gcp_credentials.json. Please create a Google service account key for a Google Cloud Platform project with the Speech-to-Text API enabled, then download that key as a JSON file and save it as StreamingAssets/gcp_credentials.json in this project. For more info on creating a service account key, see Google's documentation: https://cloud.google.com/speech-to-text/docs/quickstart-client-libraries#before-you-begin");
-                return;
+                // return;
             }
 
-            Environment.SetEnvironmentVariable("GOOGLE_APPLICATION_CREDENTIALS", credentialsPath);
+            // Environment.SetEnvironmentVariable("GOOGLE_APPLICATION_CREDENTIALS", credentialsPath);
 
             AudioConfiguration audioConfiguration = AudioSettings.GetConfiguration();
 
@@ -279,7 +281,10 @@ namespace GoogleCloudStreamingSpeechToText {
         }
 
         private async void StreamingMicRecognizeAsync() {
-            SpeechClient speech = SpeechClient.Create();
+            SpeechClientBuilder builder = new SpeechClientBuilder();
+            builder.CredentialsPath = Path.Combine(Application.streamingAssetsPath, CredentialFileName);
+            SpeechClient speech = builder.Build();
+            
             _streamingCall = speech.StreamingRecognize();
 
             AudioConfiguration audioConfiguration = AudioSettings.GetConfiguration();
@@ -290,7 +295,7 @@ namespace GoogleCloudStreamingSpeechToText {
                     Config = new RecognitionConfig() {
                         Encoding = RecognitionConfig.Types.AudioEncoding.Linear16,
                         SampleRateHertz = audioConfiguration.sampleRate,
-                        LanguageCode = "en",
+                        LanguageCode = LanguageCode,
                         MaxAlternatives = 1
                     },
                     InterimResults = returnInterimResults,
