@@ -11,6 +11,7 @@ using Google.Protobuf;
 using Google.Protobuf.WellKnownTypes;
 using Google.Cloud.Speech.V1;
 using Grpc.Core;
+using UnityEngine.Networking;
 
 namespace GoogleCloudStreamingSpeechToText {
     [Serializable]
@@ -58,6 +59,9 @@ namespace GoogleCloudStreamingSpeechToText {
         private double _bridgingOffset = 0;
 
         private const string CredentialFileName = "gcp_credentials.json";
+#if UNITY_ANDROID
+        private string jsonCredentials = "";
+#endif
         private const double NormalizedFloatTo16BitConversionFactor = 0x7FFF + 0.4999999999999999;
         private const float MicInitializationTimeout = 1;
         private const int StreamingLimit = 290000; // almost 5 minutes
@@ -111,6 +115,18 @@ namespace GoogleCloudStreamingSpeechToText {
                 Debug.LogError("Could not find StreamingAssets/gcp_credentials.json. Please create a Google service account key for a Google Cloud Platform project with the Speech-to-Text API enabled, then download that key as a JSON file and save it as StreamingAssets/gcp_credentials.json in this project. For more info on creating a service account key, see Google's documentation: https://cloud.google.com/speech-to-text/docs/quickstart-client-libraries#before-you-begin");
                 // return;
             }
+            
+            // Android apk does not include StreamingAssets as a folder. Thus, we cannot access it using System.IO (like in the IF above).
+            // Instead, we use UnityWebRequest to fetch the JSON credentials from the StreamingAssets folder and feed it directly to the SpeechClientBuilder
+            // using jsonCredentials property.
+            // Source: https://forum.unity.com/threads/cant-use-json-file-from-streamingassets-on-android-and-ios.472164/#post-3384844
+            #if UNITY_ANDROID
+                var loadingRequest = UnityWebRequest.Get(credentialsPath);
+                loadingRequest.SendWebRequest();
+                while (!loadingRequest.isDone && !loadingRequest.isNetworkError && !loadingRequest.isHttpError);
+                jsonCredentials = System.Text.Encoding.UTF8.GetString(loadingRequest.downloadHandler.data);
+                Debug.Log($"Fetched JSON Credentials for Android. jsonCredentials is: {!String.IsNullOrEmpty(jsonCredentials)}");
+            #endif
 
             // Environment.SetEnvironmentVariable("GOOGLE_APPLICATION_CREDENTIALS", credentialsPath);
 
@@ -282,7 +298,11 @@ namespace GoogleCloudStreamingSpeechToText {
 
         private async void StreamingMicRecognizeAsync() {
             SpeechClientBuilder builder = new SpeechClientBuilder();
+#if UNITY_ANDROID
+            builder.JsonCredentials = jsonCredentials;
+#else
             builder.CredentialsPath = Path.Combine(Application.streamingAssetsPath, CredentialFileName);
+#endif
             SpeechClient speech = builder.Build();
             
             _streamingCall = speech.StreamingRecognize();
