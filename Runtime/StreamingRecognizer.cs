@@ -120,13 +120,13 @@ namespace GoogleCloudStreamingSpeechToText {
             // Instead, we use UnityWebRequest to fetch the JSON credentials from the StreamingAssets folder and feed it directly to the SpeechClientBuilder
             // using jsonCredentials property.
             // Source: https://forum.unity.com/threads/cant-use-json-file-from-streamingassets-on-android-and-ios.472164/#post-3384844
-            #if UNITY_ANDROID
+#if UNITY_ANDROID && !UNITY_EDITOR
                 var loadingRequest = UnityWebRequest.Get(credentialsPath);
                 loadingRequest.SendWebRequest();
                 while (!loadingRequest.isDone && !loadingRequest.isNetworkError && !loadingRequest.isHttpError);
                 jsonCredentials = System.Text.Encoding.UTF8.GetString(loadingRequest.downloadHandler.data);
                 Debug.Log($"Fetched JSON Credentials for Android. jsonCredentials is: {!String.IsNullOrEmpty(jsonCredentials)}");
-            #endif
+#endif
 
             // Environment.SetEnvironmentVariable("GOOGLE_APPLICATION_CREDENTIALS", credentialsPath);
 
@@ -298,7 +298,7 @@ namespace GoogleCloudStreamingSpeechToText {
 
         private async void StreamingMicRecognizeAsync() {
             SpeechClientBuilder builder = new SpeechClientBuilder();
-#if UNITY_ANDROID
+#if UNITY_ANDROID && !UNITY_EDITOR
             builder.JsonCredentials = jsonCredentials;
 #else
             builder.CredentialsPath = Path.Combine(Application.streamingAssetsPath, CredentialFileName);
