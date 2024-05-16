@@ -65,7 +65,7 @@ namespace GoogleCloudStreamingSpeechToText {
 #endif
         private const double NormalizedFloatTo16BitConversionFactor = 0x7FFF + 0.4999999999999999;
         private const float MicInitializationTimeout = 1;
-        private const int StreamingLimit = 290000; // almost 5 minutes
+        private const int StreamingLimit = 10000; // almost 5 minutes
         
         public string LanguageCode { get; set; } = "he";
 
@@ -82,11 +82,15 @@ namespace GoogleCloudStreamingSpeechToText {
                 return;
             }
 
-            try {
+            try
+            {
+                Debug.Log("StreamingRecoginzer: Stopping...");
                 Task whenCanceled = Task.Delay(Timeout.InfiniteTimeSpan, _cancellationTokenSource.Token);
-
+                Debug.Log("StreamingRecoginzer: Canceling...");
+                
                 _cancellationTokenSource.Cancel();
 
+                Debug.Log("StreamingRecoginzer: Cancelled. Waiting...");
                 try {
                     await whenCanceled;
                 } catch (TaskCanceledException) {
@@ -285,6 +289,7 @@ namespace GoogleCloudStreamingSpeechToText {
                 return;
             }
             try {
+                Debug.Log("Waiting for streaming limit...")
                 await Task.Delay(StreamingLimit, _cancellationTokenSource.Token);
 
                 _newStreamOnRestart = true;
@@ -353,15 +358,24 @@ namespace GoogleCloudStreamingSpeechToText {
                 _audioSource.Stop();
 
                 await _streamingCall.WriteCompleteAsync();
-                try {
+                Debug.Log("StreamingRecoginzer: WriteCompleteAsync() called. Waiting for HandleTranscriptionResponses...")
+                try
+                {
                     await handleTranscriptionResponses;
-                } catch (RpcException) {}
+                    Debug.Log("StreamingRecoginzer: HandleTranscriptionResponses completed.");
+                }
+                catch (RpcException)
+                {
+                    Debug.Log("StreamingRecoginzer: HandleTranscriptionResponses threw RpcException. Ignoring...")
+                }
 
                 if (!_restart) {
                     onStopListening.Invoke();
                 }
 
-                if (_restart) {
+                if (_restart)
+                {
+                    Debug.Log("StreamingRecoginzer: Restarting...");
                     _restart = false;
                     if (_newStreamOnRestart) {
                         _newStreamOnRestart = false;
