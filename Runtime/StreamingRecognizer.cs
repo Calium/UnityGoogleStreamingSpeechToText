@@ -288,8 +288,9 @@ namespace GoogleCloudStreamingSpeechToText {
             if (_cancellationTokenSource == null) {
                 return;
             }
-            try {
-                Debug.Log("Waiting for streaming limit...")
+            try
+            {
+                Debug.Log("Waiting for streaming limit...");
                 await Task.Delay(StreamingLimit, _cancellationTokenSource.Token);
 
                 _newStreamOnRestart = true;
@@ -358,7 +359,8 @@ namespace GoogleCloudStreamingSpeechToText {
                 _audioSource.Stop();
 
                 await _streamingCall.WriteCompleteAsync();
-                Debug.Log("StreamingRecoginzer: WriteCompleteAsync() called. Waiting for HandleTranscriptionResponses...")
+                Debug.Log(
+                    "StreamingRecoginzer: WriteCompleteAsync() called. Waiting for HandleTranscriptionResponses...");
                 try
                 {
                     await handleTranscriptionResponses;
@@ -366,7 +368,7 @@ namespace GoogleCloudStreamingSpeechToText {
                 }
                 catch (RpcException)
                 {
-                    Debug.Log("StreamingRecoginzer: HandleTranscriptionResponses threw RpcException. Ignoring...")
+                    Debug.Log("StreamingRecoginzer: HandleTranscriptionResponses threw RpcException. Ignoring...");
                 }
 
                 if (!_restart) {
