@@ -249,40 +249,61 @@ namespace GoogleCloudStreamingSpeechToText {
             StreamingMicRecognizeAsync();
         }
 
-        private async Task HandleTranscriptionResponses() {
-            while (await _streamingCall.ResponseStream.MoveNext(default)) {
-                if (_streamingCall.ResponseStream.Current.Results.Count <= 0) {
-                    continue;
-                }
-
-                StreamingRecognitionResult result = _streamingCall.ResponseStream.Current.Results[0];
-                if (result.Alternatives.Count <= 0) {
-                    continue;
-                }
-
-                _resultEndTime = (int)((result.ResultEndTime.Seconds * 1000) + (result.ResultEndTime.Nanos / 1000000));
-
-                string transcript = result.Alternatives[0].Transcript.Trim();
-
-                if (result.IsFinal) {
-                    if (enableDebugLogging) {
-                        Debug.Log("Final: " + transcript);
-                    }
-
-                    _isFinalEndTime = _resultEndTime;
-
-                    onFinalResult.Invoke(transcript);
-                } else {
-                    if (returnInterimResults) {
-                        if (enableDebugLogging) {
-                            Debug.Log("Interim: " + transcript);
-                        }
-
-                        onInterimResult.Invoke(transcript);
-                    }
-                }
+       private async Task HandleTranscriptionResponses() {
+    bool responseReceived = false;
+    while (!responseReceived) {
+        var responseTask = _streamingCall.ResponseStream.MoveNext(default);
+        if (await Task.WhenAny(responseTask, Task.Delay(5000)) == responseTask) {
+            responseReceived = responseTask.Result;
+        } else {
+            // Timeout after 5 seconds if no response is received
+            if (enableDebugLogging) {
+                Debug.LogWarning("No response from server after 5 seconds.");
             }
+            break;
         }
+    }
+
+    if (!responseReceived) {
+        // Handle the case where no response was received
+        if (enableDebugLogging) {
+            Debug.LogWarning("No response received from the server.");
+        }
+        return;
+    }
+
+    if (_streamingCall.ResponseStream.Current.Results.Count <= 0) {
+        continue;
+    }
+
+    StreamingRecognitionResult result = _streamingCall.ResponseStream.Current.Results[0];
+    if (result.Alternatives.Count <= 0) {
+        continue;
+    }
+
+    _resultEndTime = (int)((result.ResultEndTime.Seconds * 1000) + (result.ResultEndTime.Nanos / 1000000));
+
+    string transcript = result.Alternatives[0].Transcript.Trim();
+
+    if (result.IsFinal) {
+        if (enableDebugLogging) {
+            Debug.Log("Final: " + transcript);
+        }
+
+        _isFinalEndTime = _resultEndTime;
+
+        onFinalResult.Invoke(transcript);
+    } else {
+        if (returnInterimResults) {
+            if (enableDebugLogging) {
+                Debug.Log("Interim: " + transcript);
+            }
+
+            onInterimResult.Invoke(transcript);
+        }
+    }
+}
+
 
         private async void RestartAfterStreamingLimit() {
             if (_cancellationTokenSource == null) {
