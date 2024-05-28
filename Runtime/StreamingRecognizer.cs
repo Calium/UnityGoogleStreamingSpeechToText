@@ -69,6 +69,8 @@ namespace GoogleCloudStreamingSpeechToText {
         
         public string LanguageCode { get; set; } = "he";
 
+        private bool sentResult = false;
+
         public void StartListening() {
             if (!_initialized) {
                 return;
@@ -78,41 +80,40 @@ namespace GoogleCloudStreamingSpeechToText {
         }
 
         public async void StopListening() {
-            if (!_initialized || _cancellationTokenSource == null) {
-                return;
+    if (!_initialized || _cancellationTokenSource == null) {
+        return;
+    }
+
+    try {
+        Debug.Log("StreamingRecoginzer: Stopping...");
+        Task whenCanceled = Task.Delay(Timeout.InfiniteTimeSpan, _cancellationTokenSource.Token);
+        Debug.Log("StreamingRecoginzer: Canceling...");
+
+        _cancellationTokenSource.Cancel();
+
+        Debug.Log("StreamingRecoginzer: Cancelled. Waiting...");
+        try {
+            await whenCanceled;
+        } catch (TaskCanceledException) {
+            if (enableDebugLogging) {
+                Debug.Log("Stopped.");
             }
-
-            try
-            {
-                Debug.Log("StreamingRecoginzer: Stopping...");
-                Task whenCanceled = Task.Delay(Timeout.InfiniteTimeSpan, _cancellationTokenSource.Token);
-                Debug.Log("StreamingRecoginzer: Canceling...");
-                
-                _cancellationTokenSource.Cancel();
-
-                Debug.Log("StreamingRecoginzer: Cancelled. Waiting...");
-                try {
-                    await whenCanceled;
-                } catch (TaskCanceledException) {
-                    if (enableDebugLogging) {
-                        Debug.Log("Stopped.");
-                    }
-                }
-            } catch (ObjectDisposedException) {}
         }
+    } catch (ObjectDisposedException) {}
+}
 
         public bool IsListening() {
             return _listening;
         }
 
-        private void Restart() {
-            if (!_initialized) {
-                return;
-            }
+public void Restart() {
+    if (!_initialized) {
+        return;
+    }
 
-            _restart = true;
-            StopListening();
-        }
+    _restart = true;
+    StopListening();
+}
 
         private void Awake() {
             string credentialsPath = Path.Combine(Application.streamingAssetsPath, CredentialFileName);
@@ -249,175 +250,209 @@ namespace GoogleCloudStreamingSpeechToText {
             StreamingMicRecognizeAsync();
         }
 
-       private async Task HandleTranscriptionResponses() {
-    bool responseReceived = false;
-    while (!responseReceived) {
-        var responseTask = _streamingCall.ResponseStream.MoveNext(default);
-        if (await Task.WhenAny(responseTask, Task.Delay(5000)) == responseTask) {
-            responseReceived = responseTask.Result;
-        } else {
-            // Timeout after 5 seconds if no response is received
-            if (enableDebugLogging) {
-                Debug.LogWarning("No response from server after 5 seconds.");
+private async Task HandleTranscriptionResponses() {
+    sentResult = false;
+    try {
+        while (true) {
+            var responseTask = _streamingCall.ResponseStream.MoveNext(default);
+            if (await Task.WhenAny(responseTask, Task.Delay(5000)) == responseTask) {
+                if (!responseTask.Result) {
+                    if (true) {
+                        Debug.LogWarning("No more responses from the server.");
+                    }
+                    if(!sentResult){
+                        sentResult = true;
+                        onFinalResult.Invoke("להתעלם");
+                    }
+                    break;
+                }
+            } else {
+                // Timeout after 5 seconds if no response is received
+                if (true) {
+                    Debug.LogWarning("No response from server after 5 seconds.");
+                }
+                if(!sentResult){
+                        sentResult = true;
+                        onFinalResult.Invoke("להתעלם");
+                    }
+                    break;
+                
             }
-            break;
+
+            if (_streamingCall.ResponseStream.Current.Results.Count <= 0) {
+                if (true) {
+                    Debug.LogWarning("No results in the response.");
+                }
+                continue; // Skip to the next iteration if no results
+            }
+
+            StreamingRecognitionResult result = _streamingCall.ResponseStream.Current.Results[0];
+            if (result.Alternatives.Count <= 0) {
+                if (true) {
+                    Debug.LogWarning("No alternatives in the result.");
+                }
+                continue; // Skip to the next iteration if no alternatives
+            }
+
+            _resultEndTime = (int)((result.ResultEndTime.Seconds * 1000) + (result.ResultEndTime.Nanos / 1000000));
+
+            string transcript = result.Alternatives[0].Transcript.Trim();
+
+            if (result.IsFinal) {
+                if (true) {
+                    Debug.Log("Final: " + transcript);
+                }
+
+                _isFinalEndTime = _resultEndTime;
+                sentResult = true;
+                onFinalResult.Invoke(transcript);
+            } else {
+                if (returnInterimResults) {
+                    if (true) {
+                        Debug.Log("Interim: " + transcript);
+                    }
+
+                    onInterimResult.Invoke(transcript);
+                }
+            }
+        }
+    } catch (RpcException e) {
+        if (true) {
+            Debug.LogError($"RpcException in HandleTranscriptionResponses: {e}");
+        }
+    } catch (Exception e) {
+        if (true) {
+            Debug.LogError($"Exception in HandleTranscriptionResponses: {e}");
         }
     }
+}
 
-    if (!responseReceived) {
-        // Handle the case where no response was received
-        if (enableDebugLogging) {
-            Debug.LogWarning("No response received from the server.");
+private async void StreamingMicRecognizeAsync() {
+    SpeechClientBuilder builder = new SpeechClientBuilder();
+#if UNITY_ANDROID && !UNITY_EDITOR
+    builder.JsonCredentials = jsonCredentials;
+#else
+    builder.CredentialsPath = Path.Combine(Application.streamingAssetsPath, CredentialFileName);
+#endif
+    SpeechClient speech = builder.Build();
+    
+    _streamingCall = speech.StreamingRecognize();
+
+    AudioConfiguration audioConfiguration = AudioSettings.GetConfiguration();
+
+    // Write the initial request with the config.
+    await _streamingCall.WriteAsync(new StreamingRecognizeRequest() {
+        StreamingConfig = new StreamingRecognitionConfig() {
+            Config = new RecognitionConfig() {
+                Encoding = RecognitionConfig.Types.AudioEncoding.Linear16,
+                SampleRateHertz = audioConfiguration.sampleRate,
+                LanguageCode = LanguageCode,
+                MaxAlternatives = 1
+            },
+            InterimResults = returnInterimResults,
         }
+    });
+
+    _cancellationTokenSource = new CancellationTokenSource();
+
+    Task handleTranscriptionResponses = HandleTranscriptionResponses();
+
+    _listening = true;
+
+    if (!_restart) {
+        onStartListening.Invoke();
+    }
+
+    if (enableDebugLogging) {
+        Debug.Log("Ready to transcribe.");
+    }
+
+    RestartAfterStreamingLimit();
+
+    try {
+        await Task.Delay(Timeout.InfiniteTimeSpan, _cancellationTokenSource.Token);
+    } catch (TaskCanceledException) {
+        // Stop recording and shut down.
+        if (enableDebugLogging) {
+            Debug.Log("Stopping...");
+        }
+
+        _listening = false;
+
+        Microphone.End(microphoneName);
+        _audioSource.Stop();
+
+        await _streamingCall.WriteCompleteAsync();
+        Debug.Log(
+            "StreamingRecoginzer: WriteCompleteAsync() called. Waiting for HandleTranscriptionResponses...");
+        try
+        {
+            await handleTranscriptionResponses;
+            Debug.Log("StreamingRecoginzer: HandleTranscriptionResponses completed.");
+        }
+        catch (RpcException)
+        {
+            Debug.Log("StreamingRecoginzer: HandleTranscriptionResponses threw RpcException. Ignoring...");
+        }
+
+        if (!_restart) {
+            onStopListening.Invoke();
+        }
+
+        if (_restart)
+        {
+            Debug.Log("StreamingRecoginzer: Restarting...");
+            _restart = false;
+            if (_newStreamOnRestart) {
+                _newStreamOnRestart = false;
+
+                _newStream = true;
+
+                if (_resultEndTime > 0) {
+                    _finalRequestEndTime = _isFinalEndTime;
+                }
+                _resultEndTime = 0;
+
+                _lastAudioInput = null;
+                _lastAudioInput = _audioInput;
+                _audioInput = new List<ByteString>();
+            }
+            StartListening();
+        }
+    } finally {
+        // Ensure the states are reset
+        _streamingCall = null;
+        _cancellationTokenSource = null;
+        _listening = false;
+        _restart = false;
+        _newStreamOnRestart = false;
+        _newStream = false;
+    }
+}
+
+private async void RestartAfterStreamingLimit() {
+    if (_cancellationTokenSource == null) {
         return;
     }
+    try {
+        Debug.Log("Waiting for streaming limit...");
+        await Task.Delay(StreamingLimit, _cancellationTokenSource.Token);
 
-    if (_streamingCall.ResponseStream.Current.Results.Count <= 0) {
-        continue;
-    }
+        _newStreamOnRestart = true;
 
-    StreamingRecognitionResult result = _streamingCall.ResponseStream.Current.Results[0];
-    if (result.Alternatives.Count <= 0) {
-        continue;
-    }
-
-    _resultEndTime = (int)((result.ResultEndTime.Seconds * 1000) + (result.ResultEndTime.Nanos / 1000000));
-
-    string transcript = result.Alternatives[0].Transcript.Trim();
-
-    if (result.IsFinal) {
         if (enableDebugLogging) {
-            Debug.Log("Final: " + transcript);
+            Debug.Log("Streaming limit reached, restarting...");
         }
 
-        _isFinalEndTime = _resultEndTime;
-
-        onFinalResult.Invoke(transcript);
-    } else {
-        if (returnInterimResults) {
-            if (enableDebugLogging) {
-                Debug.Log("Interim: " + transcript);
-            }
-
-            onInterimResult.Invoke(transcript);
-        }
+        Restart();
+    } catch (TaskCanceledException) {}
+}
+public bool didSendResult() {
+    return this.sentResult;
+}
     }
+
 }
 
 
-        private async void RestartAfterStreamingLimit() {
-            if (_cancellationTokenSource == null) {
-                return;
-            }
-            try
-            {
-                Debug.Log("Waiting for streaming limit...");
-                await Task.Delay(StreamingLimit, _cancellationTokenSource.Token);
-
-                _newStreamOnRestart = true;
-
-                if (enableDebugLogging) {
-                    Debug.Log("Streaming limit reached, restarting...");
-                }
-
-                Restart();
-            } catch (TaskCanceledException) {}
-        }
-
-        private async void StreamingMicRecognizeAsync() {
-            SpeechClientBuilder builder = new SpeechClientBuilder();
-#if UNITY_ANDROID && !UNITY_EDITOR
-            builder.JsonCredentials = jsonCredentials;
-#else
-            builder.CredentialsPath = Path.Combine(Application.streamingAssetsPath, CredentialFileName);
-#endif
-            SpeechClient speech = builder.Build();
-            
-            _streamingCall = speech.StreamingRecognize();
-
-            AudioConfiguration audioConfiguration = AudioSettings.GetConfiguration();
-
-            // Write the initial request with the config.
-            await _streamingCall.WriteAsync(new StreamingRecognizeRequest() {
-                StreamingConfig = new StreamingRecognitionConfig() {
-                    Config = new RecognitionConfig() {
-                        Encoding = RecognitionConfig.Types.AudioEncoding.Linear16,
-                        SampleRateHertz = audioConfiguration.sampleRate,
-                        LanguageCode = LanguageCode,
-                        MaxAlternatives = 1
-                    },
-                    InterimResults = returnInterimResults,
-                }
-            });
-
-            _cancellationTokenSource = new CancellationTokenSource();
-
-            Task handleTranscriptionResponses = HandleTranscriptionResponses();
-
-            _listening = true;
-
-            if (!_restart) {
-                onStartListening.Invoke();
-            }
-
-            if (enableDebugLogging) {
-                Debug.Log("Ready to transcribe.");
-            }
-
-            RestartAfterStreamingLimit();
-
-            try {
-                await Task.Delay(Timeout.InfiniteTimeSpan, _cancellationTokenSource.Token);
-            } catch (TaskCanceledException) {
-                // Stop recording and shut down.
-                if (enableDebugLogging) {
-                    Debug.Log("Stopping...");
-                }
-
-                _listening = false;
-
-                Microphone.End(microphoneName);
-                _audioSource.Stop();
-
-                await _streamingCall.WriteCompleteAsync();
-                Debug.Log(
-                    "StreamingRecoginzer: WriteCompleteAsync() called. Waiting for HandleTranscriptionResponses...");
-                try
-                {
-                    await handleTranscriptionResponses;
-                    Debug.Log("StreamingRecoginzer: HandleTranscriptionResponses completed.");
-                }
-                catch (RpcException)
-                {
-                    Debug.Log("StreamingRecoginzer: HandleTranscriptionResponses threw RpcException. Ignoring...");
-                }
-
-                if (!_restart) {
-                    onStopListening.Invoke();
-                }
-
-                if (_restart)
-                {
-                    Debug.Log("StreamingRecoginzer: Restarting...");
-                    _restart = false;
-                    if (_newStreamOnRestart) {
-                        _newStreamOnRestart = false;
-
-                        _newStream = true;
-
-                        if (_resultEndTime > 0) {
-                            _finalRequestEndTime = _isFinalEndTime;
-                        }
-                        _resultEndTime = 0;
-
-                        _lastAudioInput = null;
-                        _lastAudioInput = _audioInput;
-                        _audioInput = new List<ByteString>();
-                    }
-                    StartListening();
-                }
-            }
-        }
-    }
-}
 #endif
